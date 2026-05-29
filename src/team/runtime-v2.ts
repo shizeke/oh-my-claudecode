@@ -1703,6 +1703,82 @@ export async function processCliWorkerVerdicts(
 }
 
 // ---------------------------------------------------------------------------
+// Dead worker pane cleanup — kill panes + requeue tasks in one pass
+// ---------------------------------------------------------------------------
+
+export interface CleanupDeadWorkerPanesResult {
+  killedPaneIds: string[];
+  requeuedTaskIds: string[];
+}
+
+/**
+ * Kill the tmux panes of dead workers and requeue their in-progress tasks.
+ * Called from the runtime-cli v2 poll loop when monitorTeamV2 reports dead workers.
+ */
+export async function cleanupDeadWorkerPanes(
+  teamName: string,
+  deadWorkerNames: string[],
+  cwd: string,
+): Promise<CleanupDeadWorkerPanesResult> {
+  if (deadWorkerNames.length === 0) {
+    return { killedPaneIds: [], requeuedTaskIds: [] };
+  }
+
+  const sanitized = sanitizeTeamName(teamName);
+  const config = await readTeamConfig(sanitized, cwd);
+
+  const killedPaneIds: string[] = [];
+  const deadSet = new Set(deadWorkerNames);
+
+  // Kill panes of dead workers
+  if (config) {
+    const { promisify } = await import('util');
+    const execFileAsync = promisify((await import('child_process')).execFile);
+
+    for (const worker of config.workers) {
+      if (!deadSet.has(worker.name)) continue;
+      if (!worker.pane_id) continue;
+      // Guard: never kill the leader pane
+      if (worker.pane_id === config.leader_pane_id) continue;
+
+      try {
+        await execFileAsync('tmux', ['kill-pane', '-t', worker.pane_id]);
+        killedPaneIds.push(worker.pane_id);
+      } catch {
+        // Pane already gone — OK
+      }
+    }
+  }
+
+  // Requeue in-progress tasks owned by dead workers.
+  // Uses direct file I/O (no file-lock) since the owning worker is dead and
+  // cannot race with us.
+  const requeuedTaskIds: string[] = [];
+  const tasks = await listTasksFromFiles(sanitized, cwd);
+  for (const task of tasks) {
+    if (task.status !== 'in_progress') continue;
+    if (!task.owner || !deadSet.has(task.owner)) continue;
+
+    const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, task.id));
+    try {
+      const raw = await readFile(taskPath, 'utf-8');
+      const taskData = JSON.parse(raw);
+      if (taskData.status === 'in_progress') {
+        taskData.status = 'pending';
+        taskData.owner = undefined;
+        taskData.claim = undefined;
+        await writeFile(taskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+        requeuedTaskIds.push(task.id);
+      }
+    } catch {
+      // Task file may have been removed; skip
+    }
+  }
+
+  return { killedPaneIds, requeuedTaskIds };
+}
+
+// ---------------------------------------------------------------------------
 // monitorTeam — snapshot-based, event-driven (no watchdog)
 // ---------------------------------------------------------------------------
 

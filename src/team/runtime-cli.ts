@@ -14,7 +14,7 @@ import type { TeamConfig, TeamRuntime } from './runtime.js';
 import { appendTeamEvent } from './events.js';
 import { deriveTeamLeaderGuidance } from './leader-nudge-guidance.js';
 import { waitForSentinelReadiness } from './sentinel-gate.js';
-import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2 } from './runtime-v2.js';
+import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2, cleanupDeadWorkerPanes } from './runtime-v2.js';
 import type { TeamSnapshotV2 } from './runtime-v2.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 
@@ -512,6 +512,20 @@ async function main(): Promise<void> {
           exitWithoutShutdown('failed');
         }
         return;
+      }
+
+      // Clean up dead worker panes and requeue their tasks
+      if (snap.deadWorkers.length > 0) {
+        try {
+          const result = await cleanupDeadWorkerPanes(teamName, snap.deadWorkers, cwd);
+          if (result.killedPaneIds.length > 0 || result.requeuedTaskIds.length > 0) {
+            process.stderr.write(
+              `[runtime-cli/v2] Cleaned up dead workers: killed_panes=[${result.killedPaneIds.join(',')}] requeued_tasks=[${result.requeuedTaskIds.join(',')}]\n`,
+            );
+          }
+        } catch (err) {
+          process.stderr.write(`[runtime-cli/v2] cleanupDeadWorkerPanes error: ${err}\n`);
+        }
       }
 
       // Dead worker heuristic
