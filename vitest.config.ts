@@ -6,6 +6,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     testTimeout: 30000,
+    // Several tests mutate shared on-disk artifacts (hooks/hooks.json,
+    // plugin manifests). Vitest's per-file parallelism races those writes,
+    // producing flaky failures in setup-contracts-regression and
+    // hooks-command-escaping when hud-marketplace-resolution runs concurrently.
+    // Disable file parallelism so test files execute serially.
+    fileParallelism: false,
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     exclude: ['node_modules', 'dist', '.omc'],
     coverage: {

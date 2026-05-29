@@ -43,8 +43,9 @@ export async function createGitFixture(opts) {
     const tmpBase = mkdtempSync(join(tmpdir(), 'omc-test-'));
     const repoRoot = join(tmpBase, 'repo');
     mkdirSync(repoRoot, { recursive: true });
-    // Init repo
-    git(repoRoot, ['init', '-b', leaderBranchName]);
+    // Init repo (compat: git < 2.28 lacks `init -b`; use symbolic-ref fallback)
+    git(repoRoot, ['init']);
+    git(repoRoot, ['symbolic-ref', 'HEAD', `refs/heads/${leaderBranchName}`]);
     git(repoRoot, ['config', 'user.email', 'test@example.com']);
     git(repoRoot, ['config', 'user.name', 'Test User']);
     git(repoRoot, ['config', 'commit.gpgsign', 'false']);

@@ -152,12 +152,15 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   // directories despite sharing the same remote URL hash.
   let primaryRoot = root;
   try {
-    const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+    const commonDirRaw = execSync('git rev-parse --git-common-dir', {
       cwd: root,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
     }).trim();
+    // --git-common-dir output may be absolute or relative to `root` depending
+    // on the git version and repo layout; resolve so basename/parent checks work.
+    const commonDir = isAbsolute(commonDirRaw) ? commonDirRaw : resolve(root, commonDirRaw);
     // Only resolve when --git-common-dir points to a .git directory.
     // - Linked worktrees: returns <primary>/.git → dirname gives primary root ✓
     // - Submodules: returns <super>/.git/modules/<name> → skip (wrong parent)
@@ -776,14 +779,18 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
 }
 
 function getGitCommonDir(cwd: string): string | null {
+  // `git rev-parse --git-common-dir` may print an absolute path or a path
+  // relative to `cwd` (e.g. `.git` from a primary worktree's root) depending
+  // on the git version, repo layout, and whether `--path-format=absolute`
+  // is supported. Resolve relative output against `cwd` for either case.
   try {
-    const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+    const commonDir = execSync('git rev-parse --git-common-dir', {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
     }).trim();
-    return realpathSync(commonDir);
+    return realpathSync(isAbsolute(commonDir) ? commonDir : resolve(cwd, commonDir));
   } catch {
     return null;
   }

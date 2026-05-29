@@ -190,12 +190,14 @@ describe('processHook - Environment Kill-Switches', () => {
         directory: '/tmp/test'
       };
 
+      // Warm up to absorb JIT/import cost so the measured run reflects steady-state.
+      await processHook('keyword-detector', input);
+
       const start = Date.now();
       await processHook('keyword-detector', input);
       const duration = Date.now() - start;
 
-      // Should complete in under 500ms (generous threshold for CI environments)
-      // The actual overhead should be negligible (< 1ms)
+      // Steady-state overhead is < 1ms; threshold is generous to absorb noisy CI workers.
       expect(duration).toBeLessThan(500);
     });
 

@@ -709,12 +709,32 @@ export function validateWorkingDirectory(workingDirectory) {
 }
 function getGitCommonDir(cwd) {
     try {
-        const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
-            cwd,
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-            timeout: 5000,
-        }).trim();
+        // Try git >= 2.31 absolute form first; fall back to plain --git-common-dir
+        // (which can return a relative path on git < 2.31) and resolve manually.
+        let commonDir;
+        try {
+            commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+                cwd,
+                encoding: 'utf-8',
+                stdio: ['pipe', 'pipe', 'pipe'],
+                timeout: 5000,
+            }).trim();
+            if (!isAbsolute(commonDir)) {
+                // Older git silently ignores the option and prints an extra line.
+                throw new Error('non-absolute output, retry plain form');
+            }
+        }
+        catch {
+            commonDir = execSync('git rev-parse --git-common-dir', {
+                cwd,
+                encoding: 'utf-8',
+                stdio: ['pipe', 'pipe', 'pipe'],
+                timeout: 5000,
+            }).trim();
+            if (!isAbsolute(commonDir)) {
+                commonDir = resolve(cwd, commonDir);
+            }
+        }
         return realpathSync(commonDir);
     }
     catch {
